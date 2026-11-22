@@ -113,6 +113,13 @@ func (m *Manager) ResolveBinary(ctx context.Context) (string, error) {
 			return m.downloaded, nil
 		}
 	}
+	// reuse a previous auto-download (also survives an ETXTBSY race with a
+	// just-stopped child)
+	def := filepath.Join(m.cfg.DataDir, "go2rtc")
+	if fi, err := os.Stat(def); err == nil && fi.Size() > 0 {
+		m.downloaded = def
+		return def, nil
+	}
 	path, err := m.downloadLatest(ctx)
 	if err != nil {
 		return "", err

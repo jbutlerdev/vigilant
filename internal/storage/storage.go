@@ -359,17 +359,55 @@ func (s *Store) CleanEvents() int {
 	return removed
 }
 
+// RefreshEventClips re-copies event clips whose source segment has grown
+// since the copy was made. Events that end mid-hour reference the segment
+// still being written by the recorder, and an MP4 is not playable until its
+// muxer closes the file; this sweeper re-copies such clips each minute until
+// the source segment size stops changing (the segment's hour completes).
+func (s *Store) RefreshEventClips() {
+	for _, ev := range s.ListEvents("", time.Now().Add(-3*time.Hour), time.Time{}, 0) {
+		if len(ev.Clips) == 0 {
+			continue
+		}
+		dir := s.EventDir(ev)
+		src := s.CameraRecordingsDir(ev.Camera)
+		changed := false
+		for _, clip := range ev.Clips {
+			si, err := os.Stat(filepath.Join(src, clip))
+			if err != nil {
+				continue
+			}
+			di, err := os.Stat(filepath.Join(dir, clip))
+			if err == nil && di.Size() == si.Size() {
+				continue
+			}
+			if err := copyFile(filepath.Join(src, clip), filepath.Join(dir, clip)); err == nil {
+				changed = true
+			} else {
+				s.log.Warn("refresh clip", "err", err, "clip", clip)
+			}
+		}
+		if changed {
+			_ = s.SaveEvent(ev)
+		}
+	}
+}
+
 // RunCleaner prunes media on startup and then hourly.
 func (s *Store) RunCleaner(ctx context.Context) {
 	s.CleanContinuous()
 	s.CleanEvents()
-	t := time.NewTicker(time.Hour)
-	defer t.Stop()
+	clipTicker := time.NewTicker(time.Minute)
+	defer clipTicker.Stop()
+	hourly := time.NewTicker(time.Hour)
+	defer hourly.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-clipTicker.C:
+			s.RefreshEventClips()
+		case <-hourly.C:
 			s.CleanContinuous()
 			s.CleanEvents()
 		}
