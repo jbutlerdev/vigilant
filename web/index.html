@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigilant</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">◉ Vigilant</div>
+  <nav>
+    <button data-tab="live" class="tab active">Live</button>
+    <button data-tab="events" class="tab">Events</button>
+    <button data-tab="recordings" class="tab">Recordings</button>
+    <button data-tab="masks" class="tab">Masks</button>
+  </nav>
+  <div id="clock" class="clock"></div>
+</header>
+
+<main>
+  <section id="tab-live" class="panel">
+    <div id="cameras" class="camera-grid"></div>
+  </section>
+
+  <section id="tab-events" class="panel hidden">
+    <div class="toolbar">
+      <label>Camera <select id="ev-camera"></select></label>
+      <label>From <input type="date" id="ev-from"></label>
+      <label>To <input type="date" id="ev-to"></label>
+      <button id="ev-refresh">Refresh</button>
+      <span id="ev-count" class="muted"></span>
+    </div>
+    <div id="events" class="event-grid"></div>
+  </section>
+
+  <section id="tab-recordings" class="panel hidden">
+    <div class="toolbar">
+      <label>Camera <select id="rec-camera"></select></label>
+      <label>Date <input type="date" id="rec-date"></label>
+      <button id="rec-refresh">Load</button>
+    </div>
+    <div id="recordings"></div>
+  </section>
+
+  <section id="tab-masks" class="panel hidden">
+    <div class="toolbar">
+      <label>Camera <select id="mask-camera"></select></label>
+      <button id="mask-rect" class="tool">Draw rectangle</button>
+      <button id="mask-poly" class="tool">Draw polygon</button>
+      <button id="mask-undo" class="tool">Undo</button>
+      <button id="mask-clear" class="tool danger">Clear</button>
+      <button id="mask-save" class="primary">Save mask</button>
+      <span id="mask-status" class="muted"></span>
+    </div>
+    <p class="muted">Masked (red) regions are ignored by motion detection. Click to add polygon points, double-click or press Enter to close a polygon.</p>
+    <div class="mask-wrap"><canvas id="mask-canvas" width="960" height="540"></canvas></div>
+  </section>
+</main>
+
+<dialog id="event-dialog">
+  <div class="dlg-head"><h3 id="dlg-title"></h3><button id="dlg-close">✕</button></div>
+  <div id="dlg-body"></div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

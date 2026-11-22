@@ -1,0 +1,56 @@
+# Vigilant configuration.
+#
+# Single binary, single user (no auth). All cameras are restreamed through a
+# managed go2rtc child process so each camera keeps exactly one connection no
+# matter how many consumers (recorder, motion detector, web viewers) attach.
+
+server:
+  listen: ":8080"
+
+# Where recordings, events, and the go2rtc binary/state live.
+data_dir: ./data
+
+go2rtc:
+  # Name on PATH or an absolute path. If not found, Vigilant downloads the
+  # official release for this platform into data_dir on first start.
+  binary: go2rtc
+  # Internal-only listeners; the web UI reaches go2rtc through Vigilant's proxy.
+  rtsp_listen: "127.0.0.1:8554"
+  api_listen: "127.0.0.1:1984"
+
+retention:
+  continuous_days: 7   # full-time 1-hour segments split on the clock hour
+  motion_days: 30      # segments copied into motion events
+
+cameras:
+  - name: front-door
+    url: "rtsp://user:pass@192.168.1.10/main_stream"
+    record: true
+    motion:
+      # Point at the camera's low-res substream to keep CPU usage tiny;
+      # falls back to the main stream when omitted.
+      url: "rtsp://user:pass@192.168.1.10/sub_stream"
+      width: 320
+      height: 180
+      fps: 5
+      threshold: 25       # luma change (0-255) that counts as a changed pixel
+      min_pixels: 50      # changed pixels needed (after masking) for a motion frame
+      # min_ratio: 0.005  # alternative to min_pixels: fraction of unmasked area
+      window: 5s          # sliding window
+      min_frames: 3       # motion frames inside the window to enter MOTION state
+      hold: 10s           # each new motion frame resets this timer; when it
+                          # expires the event closes
+      buffer: 10s         # padding copied around events
+      mask:               # regions ignored by motion detection (normalized 0..1)
+        rectangles:
+          - { x: 0.00, y: 0.85, w: 0.25, h: 0.15 }   # e.g. swaying tree
+        polygons:
+          - points: [[0.7, 0.0], [1.0, 0.0], [1.0, 0.3], [0.8, 0.2]]
+
+  - name: garage
+    url: "rtsp://192.168.1.11/Streaming/Channels/101"
+    motion:
+      threshold: 30
+      mask:
+        rectangles:
+          - { x: 0.4, y: 0.4, w: 0.2, h: 0.2 }       # indicator LED
