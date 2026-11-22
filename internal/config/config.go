@@ -364,7 +364,7 @@ func (c *Config) SetMask(camName string, mask Mask) error {
 		return fmt.Errorf("camera %q not found", camName)
 	}
 	if cam.Motion == nil {
-		cam.Motion = &MotionConfig{}
+		cam.Motion = &cam.motion
 	}
 	cam.Motion.Mask = mask
 	cam.motion.Mask = mask

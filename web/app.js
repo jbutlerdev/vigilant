@@ -218,6 +218,8 @@ async function initMaskEditor() {
   const name = $('#mask-camera').value || (cameras[0] && cameras[0].name);
   if (!name) return;
   $('#mask-camera').value = name;
+  // re-fetch so masks saved elsewhere (API, another tab) show up
+  cameras = await fetch('/api/cameras').then((r) => r.json()).catch(() => cameras);
   const info = cameras.find((c) => c.name === name);
   mask = info && info.mask ? JSON.parse(JSON.stringify(info.mask)) : { rectangles: [], polygons: [] };
   if (!mask.rectangles) mask.rectangles = [];
@@ -231,6 +233,7 @@ async function initMaskEditor() {
     canvas.height = img.naturalHeight || 540;
     drawMask();
   };
+  img.onerror = () => drawMask();   // still show/edit the mask without a snapshot
   img.src = '/api/frame.jpg?camera=' + encodeURIComponent(name) + '&t=' + Date.now();
 }
 
@@ -331,16 +334,27 @@ window.addEventListener('keydown', (e) => {
 async function saveMask() {
   const name = $('#mask-camera').value;
   if (!name) return;
-  const res = await fetch('/api/cameras/' + encodeURIComponent(name) + '/mask', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(mask),
-  });
-  const ok = res.ok;
-  $('#mask-status').textContent = ok ? 'Saved at ' + new Date().toLocaleTimeString() : 'Save failed: ' + await res.text();
+  const el = $('#mask-status');
+  const shapes = (mask.rectangles?.length || 0) + (mask.polygons?.length || 0);
+  el.style.color = 'var(--muted)';
+  el.textContent = 'Saving ' + shapes + ' shape(s)…';
+  let res;
+  try {
+    res = await fetch('/api/cameras/' + encodeURIComponent(name) + '/mask', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mask),
+    });
+  } catch (e) { /* handled below via !res */ }
+  const ok = res && res.ok;
   if (ok) {
+    el.style.color = 'var(--ok)';
+    el.textContent = 'Saved at ' + new Date().toLocaleTimeString();
     const info = cameras.find((c) => c.name === name);
-    if (info) info.mask = mask;
+    if (info) info.mask = JSON.parse(JSON.stringify(mask));
+  } else {
+    el.style.color = 'var(--motion)';
+    el.textContent = 'SAVE FAILED' + (res ? ' (HTTP ' + res.status + ')' : ' (server unreachable)') + ' — your mask is NOT persisted';
   }
 }
 
@@ -453,15 +467,18 @@ async function saveCameraSettings(btn) {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   btn.disabled = false;
+  const st = v('status');
   if (res.ok) {
-    v('status').textContent = 'Saved · pipelines restarted';
+    st.style.color = 'var(--ok)';
+    st.textContent = 'Saved · pipelines restarted';
     const info = await res.json();
     const c = cameras.find((x) => x.name === name);
     if (c) { c.record = info.record; c.motion = info.motion; c.motion_config = info.motion_config; }
   } else {
-    v('status').textContent = 'Failed: ' + await res.text();
+    st.style.color = 'var(--motion)';
+    st.textContent = 'SAVE FAILED (' + res.status + ') — changes NOT persisted';
   }
-  setTimeout(() => { const s = v('status'); if (s) s.textContent = ''; }, 5000);
+  setTimeout(() => { const s = v('status'); if (s && s.style.color !== 'var(--motion)') s.textContent = ''; }, 5000);
 }
 
 boot();
