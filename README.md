@@ -84,7 +84,9 @@ cameras:
       height: 180
       fps: 5
       threshold: 25           # per-pixel luma delta that counts as "changed"
-      min_pixels: 50          # changed pixels needed for a motion frame
+      min_percent: 0.3        # % of the (unmasked) frame that must change for
+                              # a motion frame (the main sensitivity knob;
+                              # legacy min_pixels / min_ratio also accepted)
       window: 5s              # sliding window
       min_frames: 3           # motion frames in window => MOTION state
       hold: 10s               # motion frame resets; expiry closes event

@@ -78,19 +78,20 @@ func (m Mask) Empty() bool { return len(m.Rectangles) == 0 && len(m.Polygons) ==
 
 // MotionConfig tunes the per-camera motion detector.
 type MotionConfig struct {
-	Enabled   *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	URL       string   `yaml:"url,omitempty" json:"url,omitempty"` // substream; falls back to camera URL
-	Width     int      `yaml:"width,omitempty" json:"width,omitempty"`
-	Height    int      `yaml:"height,omitempty" json:"height,omitempty"`
-	FPS       float64  `yaml:"fps,omitempty" json:"fps,omitempty"`
-	Threshold int      `yaml:"threshold,omitempty" json:"threshold,omitempty"`   // per-pixel luma delta considered changed
-	MinPixels int      `yaml:"min_pixels,omitempty" json:"min_pixels,omitempty"` // changed pixels needed for a motion frame
-	MinRatio  float64  `yaml:"min_ratio,omitempty" json:"min_ratio,omitempty"`   // alternative: fraction of unmasked pixels
-	Window    Duration `yaml:"window,omitempty" json:"window,omitempty"`         // sliding window duration
-	MinFrames int      `yaml:"min_frames,omitempty" json:"min_frames,omitempty"` // motion frames inside window to trigger
-	Hold      Duration `yaml:"hold,omitempty" json:"hold,omitempty"`             // keep motion state this long after last motion frame
-	Buffer    Duration `yaml:"buffer,omitempty" json:"buffer,omitempty"`         // clip padding around events
-	Mask      Mask     `yaml:"mask,omitempty" json:"mask,omitempty"`
+	Enabled    *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	URL        string   `yaml:"url,omitempty" json:"url,omitempty"` // substream; falls back to camera URL
+	Width      int      `yaml:"width,omitempty" json:"width,omitempty"`
+	Height     int      `yaml:"height,omitempty" json:"height,omitempty"`
+	FPS        float64  `yaml:"fps,omitempty" json:"fps,omitempty"`
+	Threshold  int      `yaml:"threshold,omitempty" json:"threshold,omitempty"`     // per-pixel luma delta considered changed
+	MinPercent float64  `yaml:"min_percent,omitempty" json:"min_percent,omitempty"` // % of unmasked frame that must change (primary knob)
+	MinPixels  int      `yaml:"min_pixels,omitempty" json:"min_pixels,omitempty"`   // legacy: absolute pixel count
+	MinRatio   float64  `yaml:"min_ratio,omitempty" json:"min_ratio,omitempty"`     // legacy: fraction of unmasked area
+	Window     Duration `yaml:"window,omitempty" json:"window,omitempty"`           // sliding window duration
+	MinFrames  int      `yaml:"min_frames,omitempty" json:"min_frames,omitempty"`   // motion frames inside window to trigger
+	Hold       Duration `yaml:"hold,omitempty" json:"hold,omitempty"`               // keep motion state this long after last motion frame
+	Buffer     Duration `yaml:"buffer,omitempty" json:"buffer,omitempty"`           // clip padding around events
+	Mask       Mask     `yaml:"mask,omitempty" json:"mask,omitempty"`
 }
 
 // Camera is one monitored camera.
@@ -180,8 +181,8 @@ func fillMotionDefaults(m *MotionConfig) {
 	if m.Threshold <= 0 {
 		m.Threshold = 25
 	}
-	if m.MinPixels <= 0 && m.MinRatio <= 0 {
-		m.MinPixels = 50
+	if m.MinPercent <= 0 && m.MinPixels <= 0 && m.MinRatio <= 0 {
+		m.MinPercent = 0.3 // ~0.3% of the unmasked frame
 	}
 	if m.Window.Duration <= 0 {
 		m.Window = Duration{5 * time.Second}
@@ -282,11 +283,19 @@ func (c *Config) SetCameraSettings(name string, record *bool, url string, patch 
 		if patch.Threshold > 0 {
 			m.Threshold = patch.Threshold
 		}
+		if patch.MinPercent > 0 {
+			m.MinPercent = patch.MinPercent
+			m.MinPixels = 0
+			m.MinRatio = 0
+		}
 		if patch.MinPixels > 0 {
 			m.MinPixels = patch.MinPixels
+			m.MinPercent = 0
+			m.MinRatio = 0
 		}
 		if patch.MinRatio > 0 {
 			m.MinRatio = patch.MinRatio
+			m.MinPercent = 0
 			m.MinPixels = 0
 		}
 		if patch.MinFrames > 0 {

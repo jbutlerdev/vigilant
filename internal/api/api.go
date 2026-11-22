@@ -340,7 +340,7 @@ func (s *Server) handlePutCameraSettings(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("url must be a full rtsp/http URL"))
 		return
 	}
-	if req.Motion != nil && (req.Motion.Width > 4096 || req.Motion.Height > 4096 || req.Motion.FPS > 60 || req.Motion.Threshold > 255) {
+	if req.Motion != nil && (req.Motion.Width > 4096 || req.Motion.Height > 4096 || req.Motion.FPS > 60 || req.Motion.Threshold > 255 || req.Motion.MinPercent > 100) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("motion settings out of range"))
 		return
 	}

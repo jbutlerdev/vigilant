@@ -34,8 +34,10 @@ cameras:
       height: 180
       fps: 5
       threshold: 25       # luma change (0-255) that counts as a changed pixel
-      min_pixels: 50      # changed pixels needed (after masking) for a motion frame
-      # min_ratio: 0.005  # alternative to min_pixels: fraction of unmasked area
+      min_percent: 0.3    # % of the (unmasked) frame that must change for a
+                          # motion frame — the main sensitivity knob
+      # min_pixels: 50    # legacy alternatives to min_percent
+      # min_ratio: 0.005
       window: 5s          # sliding window
       min_frames: 3       # motion frames inside the window to enter MOTION state
       hold: 10s           # each new motion frame resets this timer; when it

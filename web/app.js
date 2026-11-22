@@ -348,8 +348,18 @@ async function saveMask() {
 const SEC_FIELDS = [['window', 'Trigger window (s)'], ['hold', 'Hold timer (s)'], ['buffer', 'Clip buffer (s)']];
 const NUM_FIELDS = [
   ['width', 'Motion width'], ['height', 'Motion height'], ['fps', 'Motion fps'],
-  ['threshold', 'Pixel threshold'], ['min_pixels', 'Min pixels'], ['min_frames', 'Min frames'],
+  ['threshold', 'Pixel threshold'], ['min_frames', 'Min frames'],
 ];
+
+// sensitivityPercent derives the % display value, converting legacy
+// min_pixels / min_ratio settings when min_percent is absent.
+function sensitivityPercent(mc) {
+  if (mc.min_percent > 0) return Math.round(mc.min_percent * 100) / 100;
+  if (mc.min_ratio > 0) return Math.round(mc.min_ratio * 10000) / 100;
+  if (mc.min_pixels > 0 && mc.width > 0 && mc.height > 0)
+    return Math.round((mc.min_pixels / (mc.width * mc.height)) * 10000) / 100;
+  return 0.3;
+}
 
 async function loadSettings() {
   const cams = await fetch('/api/cameras').then((r) => r.json());
@@ -400,11 +410,11 @@ async function loadSettings() {
         <input type="checkbox" id="set-${cam.name}-record" ${cam.record ? 'checked' : ''}></div>
       <div class="setting-row"><span>Motion detection</span>
         <input type="checkbox" id="set-${cam.name}-motion" ${cam.motion ? 'checked' : ''}></div>
-      <details ${cam.motion ? '' : ''}><summary class="muted" style="cursor:pointer;margin:6px 0">Motion tuning</summary>
+      <div class="setting-row"><span>Sensitivity (% of frame)</span>
+        <input type="number" min="0.01" max="100" step="0.05" id="set-${cam.name}-min_percent"
+          value="${sensitivityPercent(mc)}"></div>
+      <details><summary class="muted" style="cursor:pointer;margin:6px 0">Motion tuning</summary>
         ${nums}${secs}
-        <div class="setting-row"><span>Min ratio (0=use pixels)</span>
-          <input type="number" min="0" step="0.001" id="set-${cam.name}-min_ratio"
-            value="${mc.min_ratio || 0}"></div>
       </details>
       <div class="save-row"><span class="status-msg muted" id="set-${cam.name}-status"></span>
         <button class="primary" data-save="${cam.name}">Save</button></div>`;
@@ -430,8 +440,7 @@ async function saveCameraSettings(btn) {
       height: num('height'),
       fps: num('fps'),
       threshold: num('threshold'),
-      min_pixels: num('min_pixels'),
-      min_ratio: num('min_ratio'),
+      min_percent: num('min_percent'),
       min_frames: num('min_frames'),
       window: num('window') + 's',
       hold: num('hold') + 's',

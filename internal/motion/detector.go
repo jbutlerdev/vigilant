@@ -138,20 +138,35 @@ func (d *Detector) Run(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			d.run.Store(false)
+			d.forceEnd()
 			return
 		}
 		err := d.pipe(ctx, frameSize)
 		if ctx.Err() != nil {
 			d.run.Store(false)
+			d.forceEnd()
 			return
 		}
 		d.log.Warn("motion pipeline exited, restarting", "err", err)
 		select {
 		case <-ctx.Done():
 			d.run.Store(false)
+			d.forceEnd()
 			return
 		case <-time.After(5 * time.Second):
 		}
+	}
+}
+
+// forceEnd closes an in-progress motion event when the pipeline stops (e.g.
+// settings edit or shutdown) so events never stay open forever.
+func (d *Detector) forceEnd() {
+	d.mu.Lock()
+	inMotion := d.state == StateMotion
+	d.lastMot = time.Time{}
+	d.mu.Unlock()
+	if inMotion {
+		d.processFrame(time.Now(), 0)
 	}
 }
 
@@ -270,11 +285,23 @@ func (d *Detector) scoreFrame(prev, cur []byte) int {
 		}
 	}
 
-	if m.MinRatio > 0 {
-		active := mask.ActiveCount()
-		if active > 0 && float64(changed) < m.MinRatio*float64(active) {
+	// Motion-frame criteria: the primary knob is min_percent (% of the
+	// unmasked frame that changed); legacy min_ratio/min_pixels still honored.
+	active := mask.ActiveCount()
+	if active <= 0 {
+		return 0
+	}
+	if m.MinPercent > 0 {
+		if float64(changed) < m.MinPercent/100*float64(active) {
 			return 0
 		}
+		return changed
+	}
+	if m.MinRatio > 0 {
+		if float64(changed) < m.MinRatio*float64(active) {
+			return 0
+		}
+		return changed
 	}
 	if changed < m.MinPixels {
 		return 0
