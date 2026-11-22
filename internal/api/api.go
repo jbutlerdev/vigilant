@@ -42,7 +42,15 @@ func New(a *app.App, log *slog.Logger, webFS fs.FS) *Server {
 	s.proxy = &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
+			// go2rtc's OriginCheck rejects requests carrying X-Forwarded-Host,
+			// so deliberately do not set forwarding headers.
 			r.Out.Header.Del("X-Forwarded-For")
+			r.Out.Header.Del("X-Forwarded-Host")
+			r.Out.Header.Del("X-Forwarded-Proto")
+			r.Out.Header.Del("X-Forwarded-Uri")
+			// Present the go2rtc origin so WebRTC/MSE WebSocket upgrades pass
+			// go2rtc's origin check through the proxy.
+			r.Out.Header.Set("Origin", target.Scheme+"://"+target.Host)
 		},
 	}
 	s.routes()
