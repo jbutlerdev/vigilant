@@ -192,18 +192,20 @@ function dur(a, b) {
 // ---------------------------------------------------------------- mask editor
 let mask = { rectangles: [], polygons: [] };
 let draft = null; // current shape being drawn
+let cleared = false; // explicit Clear pressed → allow saving an empty mask
 let img = new Image();
 
 $('#mask-camera').addEventListener('change', initMaskEditor);
 $('#mask-rect').addEventListener('click', () => setTool('rect'));
 $('#mask-poly').addEventListener('click', () => setTool('poly'));
+$('#mask-close').addEventListener('click', closePolygon);
 $('#mask-undo').addEventListener('click', () => {
   if (draft) { draft = null; }
   else if (mask.polygons.length) mask.polygons.pop();
   else if (mask.rectangles.length) mask.rectangles.pop();
   drawMask();
 });
-$('#mask-clear').addEventListener('click', () => { mask = { rectangles: [], polygons: [] }; draft = null; drawMask(); });
+$('#mask-clear').addEventListener('click', () => { mask = { rectangles: [], polygons: [] }; draft = null; cleared = true; drawMask(); });
 $('#mask-save').addEventListener('click', saveMask);
 
 function setTool(t) {
@@ -211,7 +213,22 @@ function setTool(t) {
   draft = null;
   $('#mask-rect').classList.toggle('active', maskTool === 'rect');
   $('#mask-poly').classList.toggle('active', maskTool === 'poly');
+  updateCloseBtn();
   drawMask();
+}
+
+function updateCloseBtn() {
+  const btn = $('#mask-close');
+  if (btn) btn.disabled = !(draft && draft.type === 'poly' && draft.points.length >= 3);
+}
+
+function closePolygon() {
+  if (draft && draft.type === 'poly' && draft.points.length >= 3) {
+    mask.polygons.push({ points: draft.points });
+    draft = null;
+    updateCloseBtn();
+    drawMask();
+  }
 }
 
 async function initMaskEditor() {
@@ -288,46 +305,51 @@ function canvasPos(e) {
   ];
 }
 
-$('#mask-canvas').addEventListener('mousedown', (e) => {
+// Pointer events cover mouse, touch and pen uniformly. (Mouse-compat
+// events are unreliable for drags/taps on mobile browsers, so we do not
+// rely on them.)
+let dragId = null;
+
+$('#mask-canvas').addEventListener('pointerdown', (e) => {
   if (!maskTool) return;
+  e.preventDefault();
   const [x, y] = canvasPos(e);
-  if (maskTool === 'rect') draft = { type: 'rect', x0: x, y0: y, x1: x, y1: y };
-  else {
+  if (maskTool === 'rect') {
+    dragId = e.pointerId;
+    e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId);
+    draft = { type: 'rect', x0: x, y0: y, x1: x, y1: y };
+  } else {
     if (!draft) draft = { type: 'poly', points: [] };
     draft.points.push([x, y]);
+    updateCloseBtn();
   }
   drawMask();
 });
 
-$('#mask-canvas').addEventListener('mousemove', (e) => {
-  if (draft && draft.type === 'rect') {
+$('#mask-canvas').addEventListener('pointermove', (e) => {
+  if (draft && draft.type === 'rect' && e.pointerId === dragId) {
     const [x, y] = canvasPos(e);
     draft.x1 = x; draft.y1 = y;
     drawMask();
   }
 });
 
-window.addEventListener('mouseup', () => {
-  if (draft && draft.type === 'rect') {
+function endDrag(e) {
+  if (draft && draft.type === 'rect' && e.pointerId === dragId) {
+    dragId = null;
     const r = rectFrom(draft);
     if (r.w > 0.005 && r.h > 0.005) mask.rectangles.push(r);
     draft = null; drawMask();
   }
-});
+}
+$('#mask-canvas').addEventListener('pointerup', endDrag);
+$('#mask-canvas').addEventListener('pointercancel', endDrag);
 
-$('#mask-canvas').addEventListener('dblclick', () => {
-  if (draft && draft.type === 'poly' && draft.points.length >= 3) {
-    mask.polygons.push({ points: draft.points });
-    draft = null; drawMask();
-  }
-});
+$('#mask-canvas').addEventListener('dblclick', closePolygon);
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && $('#tab-masks') && !$('#tab-masks').classList.contains('hidden')) {
-    if (draft && draft.type === 'poly' && draft.points.length >= 3) {
-      mask.polygons.push({ points: draft.points });
-      draft = null; drawMask();
-    }
+    closePolygon();
   }
 });
 
@@ -336,6 +358,12 @@ async function saveMask() {
   if (!name) return;
   const el = $('#mask-status');
   const shapes = (mask.rectangles?.length || 0) + (mask.polygons?.length || 0);
+  if (shapes === 0 && !cleared) {
+    el.style.color = 'var(--motion)';
+    el.textContent = 'No shapes drawn yet — choose Rectangle/Polygon and draw first (a polygon must be closed).';
+    return;
+  }
+  cleared = false;
   el.style.color = 'var(--muted)';
   el.textContent = 'Saving ' + shapes + ' shape(s)…';
   let res;

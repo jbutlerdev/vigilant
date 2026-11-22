@@ -50,12 +50,13 @@
       <label>Camera <select id="mask-camera"></select></label>
       <button id="mask-rect" class="tool">Draw rectangle</button>
       <button id="mask-poly" class="tool">Draw polygon</button>
+      <button id="mask-close" class="tool" disabled>Close polygon</button>
       <button id="mask-undo" class="tool">Undo</button>
       <button id="mask-clear" class="tool danger">Clear</button>
       <button id="mask-save" class="primary">Save mask</button>
       <span id="mask-status" class="muted"></span>
     </div>
-    <p class="muted">Masked (red) regions are ignored by motion detection. Click to add polygon points, double-click or press Enter to close a polygon.</p>
+    <p class="muted">Masked (red) regions are ignored by motion detection. Rectangle: press and drag. Polygon: tap points, then Close polygon. On touch screens zoom the page if you need finer placement.</p>
     <div class="mask-wrap"><canvas id="mask-canvas" width="960" height="540"></canvas></div>
   </section>
 
