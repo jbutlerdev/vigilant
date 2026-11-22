@@ -15,6 +15,7 @@
     <button data-tab="events" class="tab">Events</button>
     <button data-tab="recordings" class="tab">Recordings</button>
     <button data-tab="masks" class="tab">Masks</button>
+    <button data-tab="settings" class="tab">Settings</button>
   </nav>
   <div id="clock" class="clock"></div>
 </header>
@@ -56,6 +57,13 @@
     </div>
     <p class="muted">Masked (red) regions are ignored by motion detection. Click to add polygon points, double-click or press Enter to close a polygon.</p>
     <div class="mask-wrap"><canvas id="mask-canvas" width="960" height="540"></canvas></div>
+  </section>
+
+  <section id="tab-settings" class="panel hidden">
+    <div class="toolbar">
+      <span class="muted">Changes are saved to config.yaml and applied immediately (camera pipelines restart).</span>
+    </div>
+    <div id="settings" class="settings-grid"></div>
   </section>
 </main>
 

@@ -29,6 +29,9 @@ type App struct {
 	detectors map[string]*motion.Detector
 	active    map[string]*motion.Event // in-progress events per camera
 
+	bgCtx     context.Context
+	cancelCam map[string]context.CancelFunc
+
 	hub *Hub
 }
 
@@ -50,6 +53,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		ffmpeg:    ffmpeg,
 		detectors: map[string]*motion.Detector{},
 		active:    map[string]*motion.Event{},
+		cancelCam: map[string]context.CancelFunc{},
 		hub:       NewHub(),
 	}, nil
 }
@@ -59,22 +63,12 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.Go2RTC.Start(ctx); err != nil {
 		return err
 	}
+	a.mu.Lock()
+	a.bgCtx = ctx
 	for _, cam := range a.Cfg.Cameras {
-		if cam.RecordEnabled() {
-			src := fmt.Sprintf("%s/%s", a.Go2RTC.RTSPBase(), cam.Name)
-			r := recorder.New(cam, src, a.Store.CameraRecordingsDir(cam.Name), a.ffmpeg, a.Log)
-			go r.Run(ctx)
-		}
-		if cam.MotionEnabled() {
-			stream := a.Go2RTC.StreamNameForMotion(cam)
-			src := fmt.Sprintf("%s/%s", a.Go2RTC.RTSPBase(), stream)
-			d := motion.NewDetector(cam, src, a.ffmpeg, a, a.Log)
-			a.mu.Lock()
-			a.detectors[cam.Name] = d
-			a.mu.Unlock()
-			go d.Run(ctx)
-		}
+		a.startCameraLocked(ctx, cam)
 	}
+	a.mu.Unlock()
 	a.hub.Broadcast(a.State())
 	go func() {
 		// republish state periodically so SSE clients stay fresh
@@ -89,6 +83,54 @@ func (a *App) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	return nil
+}
+
+// startCameraLocked launches recorder/detector goroutines for a camera on
+// ctx. Callers must hold a.mu.
+func (a *App) startCameraLocked(ctx context.Context, cam *config.Camera) {
+	if cam.RecordEnabled() {
+		src := fmt.Sprintf("%s/%s", a.Go2RTC.RTSPBase(), cam.Name)
+		r := recorder.New(cam, src, a.Store.CameraRecordingsDir(cam.Name), a.ffmpeg, a.Log)
+		go r.Run(ctx)
+	}
+	if cam.MotionEnabled() {
+		stream := a.Go2RTC.StreamNameForMotion(cam)
+		src := fmt.Sprintf("%s/%s", a.Go2RTC.RTSPBase(), stream)
+		d := motion.NewDetector(cam, src, a.ffmpeg, a, a.Log)
+		a.detectors[cam.Name] = d
+		go d.Run(ctx)
+	}
+}
+
+// RestartCamera tears down and relaunches a camera's pipelines so edited
+// settings (frame size, fps, substream URL, record/motion toggles) apply.
+func (a *App) RestartCamera(name string) error {
+	err := func() error {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.bgCtx == nil {
+			return fmt.Errorf("app not started")
+		}
+		cam := a.Cfg.Camera(name)
+		if cam == nil {
+			return fmt.Errorf("camera %q not found", name)
+		}
+		if cancel, ok := a.cancelCam[name]; ok {
+			cancel()
+		}
+		ctx, cancel := context.WithCancel(a.bgCtx)
+		a.cancelCam[name] = cancel
+		delete(a.detectors, name)
+		if cam.RecordEnabled() || cam.MotionEnabled() {
+			a.startCameraLocked(ctx, cam)
+		}
+		return nil
+	}()
+	if err != nil {
+		return err
+	}
+	a.Republish()
 	return nil
 }
 
@@ -160,6 +202,9 @@ func (a *App) OnMotionEnd(ev motion.Event) {
 	}
 	a.hub.Broadcast(a.State())
 }
+
+// Republish broadcasts a fresh state snapshot to SSE clients.
+func (a *App) Republish() { go a.hub.Broadcast(a.State()) }
 
 // Subscribe registers an SSE client.
 func (a *App) Subscribe() chan string { return a.hub.Subscribe() }

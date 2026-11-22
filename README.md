@@ -130,6 +130,8 @@ the scene keeps the event open; a leaf flicker never leaves IDLE.
 | `GET` | `/api/cameras` | Cameras incl. resolved motion settings + mask |
 | `GET` | `/api/frame.jpg?camera=NAME` | JPEG snapshot |
 | `PUT` | `/api/cameras/NAME/mask` | Replace mask (JSON `{rectangles, polygons}`), persists to YAML, hot-applies |
+| `PUT` | `/api/cameras/NAME/settings` | Edit camera URL / record & motion toggles / motion tuning; persists to YAML and restarts that camera's pipelines |
+| `PUT` | `/api/config/retention` | Update `continuous_days` / `motion_days`; persists to YAML |
 | `GET` | `/api/events?camera=&from=&to=&limit=` | List events |
 | `GET` | `/api/events/{id}` | One event |
 | `DELETE` | `/api/events/{id}` | Delete an event |

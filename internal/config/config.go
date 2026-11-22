@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,28 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 
 // MarshalYAML renders the duration as a string.
 func (d Duration) MarshalYAML() (interface{}, error) { return d.Duration.String(), nil }
+
+// MarshalJSON renders the duration as a Go duration string ("5s").
+func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(d.Duration.String()) }
+
+// UnmarshalJSON accepts a duration string ("5s") or nanoseconds.
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		parsed, err := time.ParseDuration(s)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		d.Duration = parsed
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	d.Duration = time.Duration(n)
+	return nil
+}
 
 // Rect is a normalized (0..1) rectangle in frame coordinates.
 type Rect struct {
@@ -140,6 +163,40 @@ func (c *Camera) MotionSettings() MotionConfig { return c.motion }
 
 func boolPtr(b bool) *bool { return &b }
 
+// fillMotionDefaults applies defaults to any unset field.
+func fillMotionDefaults(m *MotionConfig) {
+	if m.Enabled == nil {
+		m.Enabled = boolPtr(true)
+	}
+	if m.Width <= 0 {
+		m.Width = 320
+	}
+	if m.Height <= 0 {
+		m.Height = 180
+	}
+	if m.FPS <= 0 {
+		m.FPS = 5
+	}
+	if m.Threshold <= 0 {
+		m.Threshold = 25
+	}
+	if m.MinPixels <= 0 && m.MinRatio <= 0 {
+		m.MinPixels = 50
+	}
+	if m.Window.Duration <= 0 {
+		m.Window = Duration{5 * time.Second}
+	}
+	if m.MinFrames <= 0 {
+		m.MinFrames = 3
+	}
+	if m.Hold.Duration <= 0 {
+		m.Hold = Duration{10 * time.Second}
+	}
+	if m.Buffer.Duration <= 0 {
+		m.Buffer = Duration{10 * time.Second}
+	}
+}
+
 func (c *Config) applyDefaults() error {
 	if c.Server.Listen == "" {
 		c.Server.Listen = ":8080"
@@ -182,40 +239,83 @@ func (c *Config) applyDefaults() error {
 		if cam.Motion != nil {
 			*m = *cam.Motion
 		}
-		if m.Enabled == nil {
-			m.Enabled = boolPtr(true)
-		}
-		if m.Width <= 0 {
-			m.Width = 320
-		}
-		if m.Height <= 0 {
-			m.Height = 180
-		}
-		if m.FPS <= 0 {
-			m.FPS = 5
-		}
-		if m.Threshold <= 0 {
-			m.Threshold = 25
-		}
-		if m.MinPixels <= 0 && m.MinRatio <= 0 {
-			m.MinPixels = 50
-		}
-		if m.Window.Duration <= 0 {
-			m.Window = Duration{5 * time.Second}
-		}
-		if m.MinFrames <= 0 {
-			m.MinFrames = 3
-		}
-		if m.Hold.Duration <= 0 {
-			m.Hold = Duration{10 * time.Second}
-		}
-		if m.Buffer.Duration <= 0 {
-			m.Buffer = Duration{10 * time.Second}
-		}
+		fillMotionDefaults(m)
 		cam.motion = *m
 		cam.Motion = &cam.motion
 	}
 	return nil
+}
+
+// SetCameraSettings merges edited fields into a camera's configuration,
+// re-applies defaults, and persists the YAML. Only non-zero fields in the
+// patch are applied; mask is managed separately via SetMask. The caller is
+// responsible for restarting the camera's pipelines (App.RestartCamera).
+func (c *Config) SetCameraSettings(name string, record *bool, url string, patch *MotionConfig) error {
+	cam := c.Camera(name)
+	if cam == nil {
+		return fmt.Errorf("camera %q not found", name)
+	}
+	if record != nil {
+		cam.Record = record
+		cam.record = *record
+	}
+	if url != "" {
+		cam.URL = url
+	}
+	if patch != nil {
+		m := cam.motion // start from the resolved settings
+		if patch.Enabled != nil {
+			m.Enabled = patch.Enabled
+		}
+		if patch.URL != "" {
+			m.URL = patch.URL
+		}
+		if patch.Width > 0 {
+			m.Width = patch.Width
+		}
+		if patch.Height > 0 {
+			m.Height = patch.Height
+		}
+		if patch.FPS > 0 {
+			m.FPS = patch.FPS
+		}
+		if patch.Threshold > 0 {
+			m.Threshold = patch.Threshold
+		}
+		if patch.MinPixels > 0 {
+			m.MinPixels = patch.MinPixels
+		}
+		if patch.MinRatio > 0 {
+			m.MinRatio = patch.MinRatio
+			m.MinPixels = 0
+		}
+		if patch.MinFrames > 0 {
+			m.MinFrames = patch.MinFrames
+		}
+		if patch.Window.Duration > 0 {
+			m.Window = patch.Window
+		}
+		if patch.Hold.Duration > 0 {
+			m.Hold = patch.Hold
+		}
+		if patch.Buffer.Duration > 0 {
+			m.Buffer = patch.Buffer
+		}
+		fillMotionDefaults(&m)
+		cam.motion = m
+		cam.Motion = &cam.motion
+	}
+	return c.Save()
+}
+
+// SetRetention updates the retention policy and persists the YAML.
+func (c *Config) SetRetention(continuousDays, motionDays int) error {
+	if continuousDays < 1 || continuousDays > 3650 || motionDays < 1 || motionDays > 3650 {
+		return fmt.Errorf("retention days must be between 1 and 3650")
+	}
+	c.Retention.ContinuousDays = continuousDays
+	c.Retention.MotionDays = motionDays
+	return c.Save()
 }
 
 // Load reads, defaults, and validates the YAML config at path.

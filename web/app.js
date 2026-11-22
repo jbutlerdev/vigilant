@@ -15,6 +15,7 @@ $$('nav .tab').forEach((btn) => {
     if (btn.dataset.tab === 'events') loadEvents();
     if (btn.dataset.tab === 'recordings') loadRecordings();
     if (btn.dataset.tab === 'masks') initMaskEditor();
+    if (btn.dataset.tab === 'settings') loadSettings();
   });
 });
 
@@ -341,6 +342,117 @@ async function saveMask() {
     const info = cameras.find((c) => c.name === name);
     if (info) info.mask = mask;
   }
+}
+
+// ---------------------------------------------------------------- settings
+const SEC_FIELDS = [['window', 'Trigger window (s)'], ['hold', 'Hold timer (s)'], ['buffer', 'Clip buffer (s)']];
+const NUM_FIELDS = [
+  ['width', 'Motion width'], ['height', 'Motion height'], ['fps', 'Motion fps'],
+  ['threshold', 'Pixel threshold'], ['min_pixels', 'Min pixels'], ['min_frames', 'Min frames'],
+];
+
+async function loadSettings() {
+  const cams = await fetch('/api/cameras').then((r) => r.json());
+  const st = await fetch('/api/state').then((r) => r.json());
+  const root = $('#settings');
+  root.innerHTML = '';
+
+  // retention card
+  const ret = document.createElement('div');
+  ret.className = 'settings-card';
+  ret.innerHTML = `
+    <h3>Retention</h3>
+    <div class="setting-row"><span>Continuous days</span>
+      <input type="number" min="1" max="3650" id="ret-cont" value="${st.retention.continuous_days}"></div>
+    <div class="setting-row"><span>Motion event days</span>
+      <input type="number" min="1" max="3650" id="ret-mot" value="${st.retention.motion_days}"></div>
+    <div class="save-row"><span class="status-msg muted" id="ret-status"></span>
+      <button class="primary" id="ret-save">Save</button></div>`;
+  root.appendChild(ret);
+  $('#ret-save').addEventListener('click', async () => {
+    const res = await fetch('/api/config/retention', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        continuous_days: +$('#ret-cont').value,
+        motion_days: +$('#ret-mot').value,
+      }),
+    });
+    $('#ret-status').textContent = res.ok ? 'Saved' : 'Failed: ' + res.status;
+  });
+
+  for (const cam of cams) {
+    const mc = cam.motion_config || {};
+    const card = document.createElement('div');
+    card.className = 'settings-card';
+    const secs = SEC_FIELDS.map(([f, label]) =>
+      `<div class="setting-row"><span>${label}</span><input type="number" min="0.1" step="0.5"
+        id="set-${cam.name}-${f}" value="${parseFloat(mc[f]) || 0}"></div>`).join('');
+    const nums = NUM_FIELDS.map(([f, label]) =>
+      `<div class="setting-row"><span>${label}</span><input type="number" min="1"
+        id="set-${cam.name}-${f}" value="${mc[f] || ''}"></div>`).join('');
+    card.innerHTML = `
+      <h3>${cam.name} <span class="badge ${cam.motion ? 'idle' : ''}">${cam.motion ? 'motion on' : 'motion off'}</span></h3>
+      <div class="setting-row"><span>Camera URL</span>
+        <input type="text" id="set-${cam.name}-url" value="${cam.url || ''}"></div>
+      <div class="setting-row"><span>Motion substream URL</span>
+        <input type="text" id="set-${cam.name}-murl" value="${mc.url || ''}"></div>
+      <div class="setting-row"><span>Recording</span>
+        <input type="checkbox" id="set-${cam.name}-record" ${cam.record ? 'checked' : ''}></div>
+      <div class="setting-row"><span>Motion detection</span>
+        <input type="checkbox" id="set-${cam.name}-motion" ${cam.motion ? 'checked' : ''}></div>
+      <details ${cam.motion ? '' : ''}><summary class="muted" style="cursor:pointer;margin:6px 0">Motion tuning</summary>
+        ${nums}${secs}
+        <div class="setting-row"><span>Min ratio (0=use pixels)</span>
+          <input type="number" min="0" step="0.001" id="set-${cam.name}-min_ratio"
+            value="${mc.min_ratio || 0}"></div>
+      </details>
+      <div class="save-row"><span class="status-msg muted" id="set-${cam.name}-status"></span>
+        <button class="primary" data-save="${cam.name}">Save</button></div>`;
+    root.appendChild(card);
+  }
+
+  root.querySelectorAll('button[data-save]').forEach((btn) => {
+    btn.addEventListener('click', () => saveCameraSettings(btn));
+  });
+}
+
+async function saveCameraSettings(btn) {
+  const name = btn.dataset.save;
+  const v = (f) => document.getElementById(`set-${name}-${f}`);
+  const num = (f) => { const el = v(f); const n = parseFloat(el.value); return isNaN(n) ? 0 : n; };
+  const body = {
+    record: v('record').checked,
+    url: v('url').value.trim(),
+    motion: {
+      enabled: v('motion').checked,
+      url: v('murl').value.trim(),
+      width: num('width'),
+      height: num('height'),
+      fps: num('fps'),
+      threshold: num('threshold'),
+      min_pixels: num('min_pixels'),
+      min_ratio: num('min_ratio'),
+      min_frames: num('min_frames'),
+      window: num('window') + 's',
+      hold: num('hold') + 's',
+      buffer: num('buffer') + 's',
+    },
+  };
+  v('status').textContent = 'Saving…';
+  btn.disabled = true;
+  const res = await fetch('/api/cameras/' + encodeURIComponent(name) + '/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  btn.disabled = false;
+  if (res.ok) {
+    v('status').textContent = 'Saved · pipelines restarted';
+    const info = await res.json();
+    const c = cameras.find((x) => x.name === name);
+    if (c) { c.record = info.record; c.motion = info.motion; c.motion_config = info.motion_config; }
+  } else {
+    v('status').textContent = 'Failed: ' + await res.text();
+  }
+  setTimeout(() => { const s = v('status'); if (s) s.textContent = ''; }, 5000);
 }
 
 boot();

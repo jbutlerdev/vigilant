@@ -87,6 +87,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/recordings", s.handleListRecordings)
 	m.HandleFunc("GET /api/recordings/file", s.handleRecordingFile)
 	m.HandleFunc("PUT /api/cameras/{name}/mask", s.handlePutMask)
+	m.HandleFunc("PUT /api/cameras/{name}/settings", s.handlePutCameraSettings)
+	m.HandleFunc("PUT /api/config/retention", s.handlePutRetention)
 	m.HandleFunc("GET /api/sse", s.handleSSE)
 	// go2rtc proxy (live viewing: WebRTC/MSE/WebSocket, widget)
 	m.Handle("/go2rtc/", http.StripPrefix("/go2rtc", s.proxy))
@@ -146,6 +148,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCameras(w http.ResponseWriter, r *http.Request) {
 	type camView struct {
 		Name      string              `json:"name"`
+		URL       string              `json:"url"`
 		Record    bool                `json:"record"`
 		Motion    bool                `json:"motion"`
 		Stream    string              `json:"stream"`
@@ -156,6 +159,7 @@ func (s *Server) handleCameras(w http.ResponseWriter, r *http.Request) {
 	for _, cam := range s.app.Cfg.Cameras {
 		out = append(out, camView{
 			Name:      cam.Name,
+			URL:       cam.URL,
 			Record:    cam.RecordEnabled(),
 			Motion:    cam.MotionEnabled(),
 			Stream:    s.app.Go2RTC.StreamNameForView(cam),
@@ -311,6 +315,67 @@ func (s *Server) handlePutMask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true, "camera": name, "mask": mask})
+}
+
+func (s *Server) handlePutCameraSettings(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if s.requireCamera(w, name) == nil {
+		return
+	}
+	var req struct {
+		Record *bool                `json:"record"`
+		URL    string               `json:"url"`
+		Motion *config.MotionConfig `json:"motion"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.URL != "" && !strings.Contains(req.URL, "://") {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("url must be a full rtsp/http URL"))
+		return
+	}
+	if req.Motion != nil && (req.Motion.Width > 4096 || req.Motion.Height > 4096 || req.Motion.FPS > 60 || req.Motion.Threshold > 255) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("motion settings out of range"))
+		return
+	}
+	if err := s.app.Cfg.SetCameraSettings(name, req.Record, req.URL, req.Motion); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.app.RestartCamera(name); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	cam := s.app.Cfg.Camera(name)
+	writeJSON(w, map[string]interface{}{"ok": true, "camera": name, "record": cam.RecordEnabled(), "motion": cam.MotionEnabled(), "motion_config": cam.MotionSettings()})
+}
+
+func (s *Server) handlePutRetention(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ContinuousDays int `json:"continuous_days"`
+		MotionDays     int `json:"motion_days"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.app.Cfg.SetRetention(req.ContinuousDays, req.MotionDays); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	s.app.Republish()
+	writeJSON(w, map[string]interface{}{"ok": true, "retention": s.app.Cfg.Retention})
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
