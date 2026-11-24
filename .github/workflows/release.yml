@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build linux/$arch
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so git describe yields a sane version
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build static binary
+        run: make build GOOS=linux GOARCH=${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vigilant_linux_${{ matrix.arch }}
+          path: dist/vigilant_linux_${{ matrix.arch }}
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vigilant_linux_*
+          merge-multiple: false
+      - name: Checksums
+        run: |
+          mkdir -p out
+          mv vigilant_linux_amd64/vigilant_linux_amd64 out/
+          mv vigilant_linux_arm64/vigilant_linux_arm64 out/
+          (cd out && sha256sum vigilant_linux_amd64 vigilant_linux_arm64 > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/vigilant_linux_amd64
+            out/vigilant_linux_arm64
+            out/SHA256SUMS
+          generate_release_notes: true
