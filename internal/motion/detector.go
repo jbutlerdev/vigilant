@@ -45,14 +45,15 @@ func (s State) String() string {
 
 // Event describes a completed motion event.
 type Event struct {
-	ID        string    `json:"id"`
-	Camera    string    `json:"camera"`
-	Start     time.Time `json:"start"`
-	End       time.Time `json:"end"`
-	Frames    int       `json:"frames"`
-	MaxScore  int       `json:"max_score"`
-	Thumbnail string    `json:"thumbnail,omitempty"`
-	Clips     []string  `json:"clips,omitempty"`
+	ID           string    `json:"id"`
+	Camera       string    `json:"camera"`
+	Start        time.Time `json:"start"`
+	End          time.Time `json:"end"`
+	Frames       int       `json:"frames"`
+	MaxScore     int       `json:"max_score"`
+	Thumbnail    string    `json:"thumbnail,omitempty"`
+	Clips        []string  `json:"clips,omitempty"`
+	ClipsPending bool      `json:"clips_pending,omitempty"` // clips await the hour segment completing
 }
 
 // Status is the live detector status for one camera.
@@ -92,6 +93,13 @@ type Detector struct {
 
 	frames atomic.Uint64
 	run    atomic.Bool
+
+	// temporal noise filter: a pixel counts only when it changed in both
+	// of the last two consecutive diffs (kills compression flicker, IR
+	// noise, and swaying foliage while people/cars still light up).
+	curDiff  []byte
+	prevDiff []byte
+	haveDiff bool
 }
 
 // NewDetector builds a detector for a camera. streamURL is the local go2rtc
@@ -250,40 +258,44 @@ func (d *Detector) scoreFrame(prev, cur []byte) int {
 	n := len(prev)
 	thr := byte(m.Threshold)
 
-	// Hot loop: linear pass over contiguous equal-length byte slices;
-	// the compiler autovectorizes the per-byte abs-diff/compare and the
-	// mask lookup stays in L1 at these frame sizes.
+	if len(d.curDiff) != n {
+		d.curDiff = make([]byte, n)
+		d.prevDiff = make([]byte, n)
+		d.haveDiff = false
+	}
+
+	// Hot loop over contiguous byte slices (autovectorizable).
+	for i := 0; i < n; i++ {
+		d.curDiff[i] = 0
+		if mask.Ignored(i) {
+			continue
+		}
+		a, b := prev[i], cur[i]
+		var dif byte
+		if a > b {
+			dif = a - b
+		} else {
+			dif = b - a
+		}
+		if dif >= thr {
+			d.curDiff[i] = 1
+		}
+	}
+
 	changed := 0
-	if mask.None() {
+	if d.haveDiff {
 		for i := 0; i < n; i++ {
-			a, b := prev[i], cur[i]
-			d := byte(0)
-			if a > b {
-				d = a - b
-			} else {
-				d = b - a
-			}
-			if d >= thr {
+			if d.curDiff[i] != 0 && d.prevDiff[i] != 0 {
 				changed++
 			}
 		}
 	} else {
 		for i := 0; i < n; i++ {
-			if mask.Ignored(i) {
-				continue
-			}
-			a, b := prev[i], cur[i]
-			d := byte(0)
-			if a > b {
-				d = a - b
-			} else {
-				d = b - a
-			}
-			if d >= thr {
-				changed++
-			}
+			changed += int(d.curDiff[i])
 		}
 	}
+	d.prevDiff, d.curDiff = d.curDiff, d.prevDiff
+	d.haveDiff = true
 
 	// Motion-frame criteria: the primary knob is min_percent (% of the
 	// unmasked frame that changed); legacy min_ratio/min_pixels still honored.

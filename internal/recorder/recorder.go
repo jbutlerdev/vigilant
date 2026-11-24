@@ -61,9 +61,11 @@ func (r *Recorder) Run(ctx context.Context) {
 }
 
 func (r *Recorder) session(ctx context.Context) error {
-	// -segment_atclocktime 1 splits on the top of every hour; the pattern is
-	// an strftime template evaluated per segment (needs -strftime 1).
-	pattern := filepath.Join(r.dir, "%Y-%m-%d_%H.mp4")
+	// -segment_atclocktime 1 cuts segments on the top of every hour. The
+	// strftime pattern names each file by its actual start time, so a
+	// mid-hour session restart creates an extra file (e.g.
+	// 2026-11-23-18-54-30.mp4) instead of overwriting the hour's file.
+	pattern := filepath.Join(r.dir, "%Y-%m-%d-%H-%M-%S.mp4")
 	args := []string{
 		"-hide_banner", "-loglevel", "error",
 		"-rtsp_transport", "tcp",
@@ -74,6 +76,10 @@ func (r *Recorder) session(ctx context.Context) error {
 		"-segment_time", "3600",
 		"-segment_atclocktime", "1",
 		"-segment_format", "mp4",
+		// Fragmented MP4: playable and ffmpeg-readable while still being
+		// written (moov-at-end MP4s are unreadable until the muxer closes
+		// them), and far more crash-tolerant.
+		"-segment_format_options", "movflags=+frag_keyframe+default_base_moof",
 		"-reset_timestamps", "1",
 		"-strftime", "1",
 		pattern,

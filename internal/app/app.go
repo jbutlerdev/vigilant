@@ -41,7 +41,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg is required but was not found in PATH: %w", err)
 	}
-	store, err := storage.New(cfg, log)
+	store, err := storage.New(cfg, log, ffmpeg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +58,16 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}, nil
 }
 
+// wire store change notification after the app (and its hub) exists
+func (a *App) setStoreHooks() {
+	if a.Store != nil {
+		a.Store.SetOnChange(a.Republish)
+	}
+}
+
 // Start launches go2rtc, recorders, detectors, and the retention cleaner.
 func (a *App) Start(ctx context.Context) error {
+	a.setStoreHooks()
 	if err := a.Go2RTC.Start(ctx); err != nil {
 		return err
 	}
@@ -196,8 +204,9 @@ func (a *App) OnMotionEnd(ev motion.Event) {
 	}
 	a.hub.Broadcast(a.State())
 
-	if err := a.Store.CopyEventSegments(stored); err != nil {
-		a.Log.Error("copy event segments", "err", err, "event", ev.ID)
+	if err := a.Store.MakeEventClips(stored); err != nil {
+		a.Log.Warn("make event clips", "err", err, "event", ev.ID) // sweeper retries
+		a.hub.Broadcast(a.State())
 		return
 	}
 	a.hub.Broadcast(a.State())

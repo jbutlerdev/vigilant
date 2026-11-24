@@ -136,8 +136,16 @@ async function openEvent(ev) {
       links.appendChild(a);
     });
     body.appendChild(links);
+  } else if (ev.clips_pending) {
+    body.innerHTML = '<p class="muted">⏳ Clips for this event are waiting for the current recording segment to finish (they appear automatically at the top of the hour).</p>';
+    if (ev.thumbnail) {
+      const img = document.createElement('img');
+      img.src = `/api/events/${ev.id}/thumbnail`;
+      img.style.width = '100%'; img.style.borderRadius = '8px';
+      body.appendChild(img);
+    }
   } else {
-    body.innerHTML = '<p class="muted">No clips (still copying, or no segments available).</p>';
+    body.innerHTML = '<p class="muted">No clips (segments were already rotated out).</p>';
   }
   const del = document.createElement('button');
   del.textContent = 'Delete event'; del.className = 'danger';

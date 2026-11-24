@@ -20,7 +20,9 @@ go2rtc:
 
 retention:
   continuous_days: 7   # full-time 1-hour segments split on the clock hour
-  motion_days: 30      # segments copied into motion events
+  motion_days: 30      # precise clips extracted for motion events
+  max_total_gb: 60     # hard disk budget for continuous recordings;
+                       # oldest segments are pruned beyond this
 
 cameras:
   - name: front-door
@@ -33,14 +35,14 @@ cameras:
       width: 320
       height: 180
       fps: 5
-      threshold: 25       # luma change (0-255) that counts as a changed pixel
-      min_percent: 0.3    # % of the (unmasked) frame that must change for a
+      threshold: 30       # luma change (0-255) that counts as a changed pixel
+      min_percent: 0.4    # % of the (unmasked) frame that must change for a
                           # motion frame — the main sensitivity knob
       # min_pixels: 50    # legacy alternatives to min_percent
       # min_ratio: 0.005
       window: 5s          # sliding window
-      min_frames: 3       # motion frames inside the window to enter MOTION state
-      hold: 10s           # each new motion frame resets this timer; when it
+      min_frames: 4       # motion frames inside the window to enter MOTION state
+      hold: 15s           # each new motion frame resets this timer; when it
                           # expires the event closes
       buffer: 10s         # padding copied around events
       mask:               # regions ignored by motion detection (normalized 0..1)

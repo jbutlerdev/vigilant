@@ -131,6 +131,7 @@ type Go2RTC struct {
 type Retention struct {
 	ContinuousDays int `yaml:"continuous_days,omitempty" json:"continuous_days,omitempty"` // full-time recordings
 	MotionDays     int `yaml:"motion_days,omitempty" json:"motion_days,omitempty"`         // motion event clips
+	MaxTotalGB     int `yaml:"max_total_gb,omitempty" json:"max_total_gb,omitempty"`       // disk budget for continuous recordings; oldest pruned first
 }
 
 // Config is the whole application configuration.
@@ -179,19 +180,19 @@ func fillMotionDefaults(m *MotionConfig) {
 		m.FPS = 5
 	}
 	if m.Threshold <= 0 {
-		m.Threshold = 25
+		m.Threshold = 30
 	}
 	if m.MinPercent <= 0 && m.MinPixels <= 0 && m.MinRatio <= 0 {
-		m.MinPercent = 0.3 // ~0.3% of the unmasked frame
+		m.MinPercent = 0.4 // ~0.4% of the unmasked frame
 	}
 	if m.Window.Duration <= 0 {
 		m.Window = Duration{5 * time.Second}
 	}
 	if m.MinFrames <= 0 {
-		m.MinFrames = 3
+		m.MinFrames = 4
 	}
 	if m.Hold.Duration <= 0 {
-		m.Hold = Duration{10 * time.Second}
+		m.Hold = Duration{15 * time.Second}
 	}
 	if m.Buffer.Duration <= 0 {
 		m.Buffer = Duration{10 * time.Second}
@@ -222,6 +223,9 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Retention.MotionDays <= 0 {
 		c.Retention.MotionDays = 30
+	}
+	if c.Retention.MaxTotalGB <= 0 {
+		c.Retention.MaxTotalGB = 60
 	}
 	seen := map[string]bool{}
 	for _, cam := range c.Cameras {

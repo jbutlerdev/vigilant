@@ -17,13 +17,19 @@ containers: just `vigilant -c config.yaml`.
 - **Motion detection** — ffmpeg decodes a tiny grayscale frame (default
   320×180 @ 5 fps from the camera's substream) and Vigilant runs a
   vectorizable frame-differencing pass; total load is a fraction of one
-  core. A **sliding window + state machine** turns noisy per-frame results
-  into stable events: N motion frames inside the window (default 3 in 5 s)
+  core. A **temporal filter** (a pixel only counts when it changed in two
+  consecutive diffs) suppresses compression flicker, IR noise and swaying
+  foliage. A **sliding window + state machine** turns per-frame results
+  into stable events: N motion frames inside the window (default 4 in 5 s)
   start an event, and every new motion frame resets the hold timer (default
-  10 s) before the event closes.
-- **Dual retention** — when an event closes, the overlapping hour segments
-  (plus configurable buffer) are copied into `data/events/…` under a
-  separate **30-day** (configurable) motion policy.
+  15 s) before the event closes.
+- **Dual retention** — when an event closes, precise stream-copy clips of
+  the event (plus configurable buffer) are extracted into `data/events/…`
+  under a separate **30-day** (configurable) motion policy — small
+  playable MP4s, not hour-long copies. If an event is still inside the
+  hour currently being recorded, extraction defers until the segment
+  completes. Continuous recordings also honor a `max_total_gb` disk budget
+  (oldest pruned first).
 - **Masks** — ignore rectangles/polygons (normalized coordinates) in YAML,
   viewable and editable in the web UI, or via the REST API. Saved masks
   persist to the config file and hot-apply to running detectors.
@@ -74,7 +80,7 @@ Everything lives in one YAML file (see [`config.example.yaml`](config.example.ya
 server:    { listen: ":8080" }
 data_dir:  ./data
 go2rtc:    { binary: go2rtc, rtsp_listen: "127.0.0.1:8554", api_listen: "127.0.0.1:1984" }
-retention: { continuous_days: 7, motion_days: 30 }
+retention: { continuous_days: 7, motion_days: 30, max_total_gb: 60 }
 cameras:
   - name: front-door
     url: "rtsp://…/main"
@@ -83,13 +89,13 @@ cameras:
       width: 320
       height: 180
       fps: 5
-      threshold: 25           # per-pixel luma delta that counts as "changed"
-      min_percent: 0.3        # % of the (unmasked) frame that must change for
+      threshold: 30           # per-pixel luma delta that counts as "changed"
+      min_percent: 0.4        # % of the (unmasked) frame that must change for
                               # a motion frame (the main sensitivity knob;
                               # legacy min_pixels / min_ratio also accepted)
       window: 5s              # sliding window
-      min_frames: 3           # motion frames in window => MOTION state
-      hold: 10s               # motion frame resets; expiry closes event
+      min_frames: 4           # motion frames in window => MOTION state
+      hold: 15s               # motion frame resets; expiry closes event
       buffer: 10s             # clip padding around events
       mask:
         rectangles: [ { x: 0, y: 0.85, w: 0.25, h: 0.15 } ]
@@ -100,10 +106,11 @@ cameras:
 
 ```
 data/
-  recordings/<camera>/2006-01-02_15.mp4    continuous, clock-hour split
+  recordings/<camera>/2006-01-02-15-04-05.mp4  continuous, fragmented MP4,
+                                   cut on the clock hour, named by start time
   events/<camera>/<id>/meta.json           event index + metadata
   events/<camera>/<id>/thumbnail.jpg
-  events/<camera>/<id>/2006-01-02_15.mp4   copies under motion retention
+  events/<camera>/<id>/clip-2006-01-02-15-04-05.mp4  precise event clips (motion retention)
 ```
 
 A cleaner runs hourly and prunes both policies independently.
