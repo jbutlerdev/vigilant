@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -322,6 +324,43 @@ func (c *Config) SetCameraSettings(name string, record *bool, url string, patch 
 }
 
 // SetRetention updates the retention policy and persists the YAML.
+var cameraNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
+
+// AddCamera validates and appends a new camera feed, then persists the
+// config. Motion settings get the standard defaults; callers can tune via
+// SetCameraSettings afterwards.
+func (c *Config) AddCamera(name, url string, record, motion bool) error {
+	if !cameraNameRe.MatchString(name) {
+		return fmt.Errorf("invalid camera name %q: use letters, digits, '-' or '_' (max 32 chars)", name)
+	}
+	if c.Camera(name) != nil {
+		return fmt.Errorf("camera %q already exists", name)
+	}
+	url = strings.TrimSpace(url)
+	if !strings.Contains(url, "://") {
+		return fmt.Errorf("camera url must be a full rtsp/http URL")
+	}
+	m := MotionConfig{Enabled: &motion}
+	fillMotionDefaults(&m)
+	cam := &Camera{Name: name, URL: url, Record: &record, Motion: &m}
+	cam.record = record
+	cam.motion = m
+	c.Cameras = append(c.Cameras, cam)
+	return c.Save()
+}
+
+// RemoveCamera drops a camera from the config and persists it. Existing
+// recordings/events on disk are left alone (retention will prune them).
+func (c *Config) RemoveCamera(name string) error {
+	for i, cam := range c.Cameras {
+		if cam.Name == name {
+			c.Cameras = append(c.Cameras[:i], c.Cameras[i+1:]...)
+			return c.Save()
+		}
+	}
+	return fmt.Errorf("camera %q not found", name)
+}
+
 func (c *Config) SetRetention(continuousDays, motionDays int) error {
 	if continuousDays < 1 || continuousDays > 3650 || motionDays < 1 || motionDays > 3650 {
 		return fmt.Errorf("retention days must be between 1 and 3650")

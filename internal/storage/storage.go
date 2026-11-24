@@ -411,7 +411,17 @@ func (s *Store) SweepPendingClips() {
 		if len(ev.Clips) == 0 {
 			if now.Sub(ev.End) > 24*time.Hour {
 				_ = s.DeleteEvent(ev.ID) // never produced clips: junk
+				continue
 			}
+			if err := s.MakeEventClips(ev); err != nil {
+				if errors.Is(err, ErrUnrecoverable) {
+					s.log.Info("dropping event with unreadable segments", "event", ev.ID)
+					_ = s.DeleteEvent(ev.ID)
+				}
+				continue
+			}
+			s.log.Info("event clips ready", "event", ev.ID, "clips", len(ev.Clips))
+			s.hub()
 			continue
 		}
 		// legacy migration: clips that are full-hour copies (huge) → precise

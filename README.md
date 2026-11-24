@@ -35,8 +35,10 @@ containers: just `vigilant -c config.yaml`.
   persist to the config file and hot-apply to running detectors.
 - **Web UI** — live viewing (WebRTC/MSE through the go2rtc proxy), live
   motion badges via SSE, event timeline with thumbnails and clip playback,
-  recording browser, and a canvas mask editor.
-- **REST API** — everything above is scriptable.
+  recording browser, canvas mask editor, and settings (retention, per-camera
+  tuning, and adding/removing camera feeds without touching YAML).
+- **REST API** — everything above is scriptable, including
+  `POST /api/cameras` / `DELETE /api/cameras/NAME` to manage feeds.
 - **Single user, no password** — by design; put it on a trusted network.
 
 ## Requirements
@@ -137,6 +139,8 @@ the scene keeps the event open; a leaf flicker never leaves IDLE.
 | `GET` | `/api/sse` | Server-sent events stream of state snapshots |
 | `GET` | `/api/config` | Current configuration |
 | `GET` | `/api/cameras` | Cameras incl. resolved motion settings + mask |
+| `POST` | `/api/cameras` | Add camera `{name, url, record?, motion?}`; persists to YAML, reloads go2rtc, starts pipelines |
+| `DELETE` | `/api/cameras/NAME` | Remove camera; stops its pipelines and persists to YAML (media on disk kept for retention) |
 | `GET` | `/api/frame.jpg?camera=NAME` | JPEG snapshot |
 | `PUT` | `/api/cameras/NAME/mask` | Replace mask (JSON `{rectangles, polygons}`), persists to YAML, hot-applies |
 | `PUT` | `/api/cameras/NAME/settings` | Edit camera URL / record & motion toggles / motion tuning; persists to YAML and restarts that camera's pipelines |

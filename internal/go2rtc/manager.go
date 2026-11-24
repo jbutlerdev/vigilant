@@ -22,6 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/jbutlerdev/vigilant/internal/config"
+	"github.com/jbutlerdev/vigilant/internal/proc"
 )
 
 // Manager owns the go2rtc child process.
@@ -241,6 +242,7 @@ func (m *Manager) supervise(ctx context.Context, confPath string) {
 			continue
 		}
 		cmd := exec.CommandContext(ctx, bin, "-c", confPath)
+		cmd.SysProcAttr = proc.ChildProcAttr()
 		w := &logWriter{prefix: "go2rtc"}
 		cmd.Stdout = w
 		cmd.Stderr = w
@@ -266,6 +268,26 @@ func (m *Manager) supervise(ctx context.Context, confPath string) {
 			backoff = 30 * time.Second
 		}
 	}
+}
+
+// Reload regenerates the stream configuration (after cameras were added
+// or removed) and restarts the go2rtc child; the supervisor relaunches it
+// against the same config file.
+func (m *Manager) Reload(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	m.BuildStreams()
+	if _, err := m.writeConfig(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	cmd := m.cmd
+	m.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	return m.WaitReady(ctx, 30*time.Second)
 }
 
 // WaitReady blocks until the go2rtc HTTP API answers.

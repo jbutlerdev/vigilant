@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jbutlerdev/vigilant/internal/config"
+	"github.com/jbutlerdev/vigilant/internal/proc"
 )
 
 // State is the detector state machine state.
@@ -193,6 +194,7 @@ func (d *Detector) pipe(ctx context.Context, frameSize int) error {
 		"-",
 	}
 	cmd := exec.CommandContext(ctx, d.ffmpeg, args...)
+	cmd.SysProcAttr = proc.ChildProcAttr()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

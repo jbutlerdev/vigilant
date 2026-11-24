@@ -440,6 +440,51 @@ async function loadSettings() {
     $('#ret-status').textContent = res.ok ? 'Saved' : 'Failed: ' + res.status;
   });
 
+  // add-camera card
+  const add = document.createElement('div');
+  add.className = 'settings-card';
+  add.innerHTML = `
+    <h3>Add camera</h3>
+    <div class="setting-row"><span>Name</span>
+      <input type="text" id="new-cam-name" placeholder="backyard" pattern="[A-Za-z0-9_-]+"></div>
+    <div class="setting-row"><span>Stream URL</span>
+      <input type="text" id="new-cam-url" placeholder="rtsp://192.168.1.50:554/stream1"></div>
+    <div class="setting-row"><span>Recording</span>
+      <input type="checkbox" id="new-cam-record" checked></div>
+    <div class="setting-row"><span>Motion detection</span>
+      <input type="checkbox" id="new-cam-motion" checked></div>
+    <div class="save-row"><span class="status-msg muted" id="new-cam-status"></span>
+      <button class="primary" id="new-cam-add">Add camera</button></div>`;
+  root.appendChild(add);
+  $('#new-cam-add').addEventListener('click', async () => {
+    const status = $('#new-cam-status');
+    const name = $('#new-cam-name').value.trim();
+    const url = $('#new-cam-url').value.trim();
+    if (!name || !url) { status.textContent = 'Name and URL are required'; return; }
+    status.style.color = '';
+    status.textContent = 'Adding…';
+    $('#new-cam-add').disabled = true;
+    const res = await fetch('/api/cameras', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, url,
+        record: $('#new-cam-record').checked,
+        motion: $('#new-cam-motion').checked,
+      }),
+    });
+    $('#new-cam-add').disabled = false;
+    if (res.ok) {
+      status.style.color = 'var(--ok)';
+      status.textContent = 'Added';
+      $('#new-cam-name').value = ''; $('#new-cam-url').value = '';
+      await loadSettings();
+    } else {
+      status.style.color = 'var(--err, #e55)';
+      const e = await res.json().catch(() => ({}));
+      status.textContent = 'Failed: ' + (e.error || res.status);
+    }
+  });
+
   for (const cam of cams) {
     const mc = cam.motion_config || {};
     const card = document.createElement('div');
@@ -467,12 +512,26 @@ async function loadSettings() {
         ${nums}${secs}
       </details>
       <div class="save-row"><span class="status-msg muted" id="set-${cam.name}-status"></span>
+        <button class="danger" data-del="${cam.name}">Remove</button>
         <button class="primary" data-save="${cam.name}">Save</button></div>`;
     root.appendChild(card);
   }
 
   root.querySelectorAll('button[data-save]').forEach((btn) => {
     btn.addEventListener('click', () => saveCameraSettings(btn));
+  });
+  root.querySelectorAll('button[data-del]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.del;
+      if (!confirm(`Remove camera "${name}"? Its pipelines stop and it disappears from the UI. Recordings already on disk are pruned by retention.`)) return;
+      btn.disabled = true;
+      const res = await fetch('/api/cameras/' + encodeURIComponent(name), { method: 'DELETE' });
+      btn.disabled = false;
+      if (res.ok) { await loadSettings(); } else {
+        const e = await res.json().catch(() => ({}));
+        alert('Failed: ' + (e.error || res.status));
+      }
+    });
   });
 }
 

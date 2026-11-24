@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jbutlerdev/vigilant/internal/config"
+	"github.com/jbutlerdev/vigilant/internal/proc"
+	"github.com/jbutlerdev/vigilant/internal/storage"
 )
 
 // Recorder supervises one ffmpeg segment-muxer per camera.
@@ -40,6 +43,7 @@ func (r *Recorder) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		r.pruneStubs()
 		start := time.Now()
 		err := r.session(ctx)
 		if ctx.Err() != nil {
@@ -56,6 +60,33 @@ func (r *Recorder) Run(ctx context.Context) {
 		}
 		if backoff *= 2; backoff > 30*time.Second {
 			backoff = 30 * time.Second
+		}
+	}
+}
+
+// pruneStubs removes tiny leftover fragments from previous recorder
+// sessions (a restart inside the current hour produces a short file named
+// from its actual start). They clutter the recordings list and contain
+// seconds of footage.
+func (r *Recorder) pruneStubs() {
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".mp4") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || fi.Size() > 10<<20 {
+			continue
+		}
+		start, ok := storage.SegmentTime(e.Name())
+		if !ok || time.Since(start) > 3*time.Hour || time.Since(start) < 2*time.Minute {
+			continue
+		}
+		if err := os.Remove(filepath.Join(r.dir, e.Name())); err == nil {
+			r.log.Info("pruned stub segment", "camera", r.cam.Name, "file", e.Name())
 		}
 	}
 }
@@ -85,6 +116,7 @@ func (r *Recorder) session(ctx context.Context) error {
 		pattern,
 	}
 	cmd := exec.CommandContext(ctx, r.ffmpeg, args...)
+	cmd.SysProcAttr = proc.ChildProcAttr()
 	stderr := &tailBuf{max: 32 << 10}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {

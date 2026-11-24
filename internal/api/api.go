@@ -78,6 +78,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/state", s.handleState)
 	m.HandleFunc("GET /api/config", s.handleConfig)
 	m.HandleFunc("GET /api/cameras", s.handleCameras)
+	m.HandleFunc("POST /api/cameras", s.handleAddCamera)
+	m.HandleFunc("DELETE /api/cameras/{name}", s.handleDeleteCamera)
 	m.HandleFunc("GET /api/frame.jpg", s.handleFrame)
 	m.HandleFunc("GET /api/events", s.handleListEvents)
 	m.HandleFunc("GET /api/events/{id}", s.handleGetEvent)
@@ -315,6 +317,49 @@ func (s *Server) handlePutMask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true, "camera": name, "mask": mask})
+}
+
+func (s *Server) handleAddCamera(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name   string `json:"name"`
+		URL    string `json:"url"`
+		Record *bool  `json:"record"`
+		Motion *bool  `json:"motion"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	record, motionEnabled := true, true
+	if req.Record != nil {
+		record = *req.Record
+	}
+	if req.Motion != nil {
+		motionEnabled = *req.Motion
+	}
+	if err := s.app.AddCamera(req.Name, req.URL, record, motionEnabled); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true, "camera": req.Name})
+}
+
+func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.app.RemoveCamera(name); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true, "removed": name})
 }
 
 func (s *Server) handlePutCameraSettings(w http.ResponseWriter, r *http.Request) {

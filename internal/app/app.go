@@ -74,7 +74,11 @@ func (a *App) Start(ctx context.Context) error {
 	a.mu.Lock()
 	a.bgCtx = ctx
 	for _, cam := range a.Cfg.Cameras {
-		a.startCameraLocked(ctx, cam)
+		// per-camera cancellable context so RestartCamera can kill the
+		// pipelines started here (a nil entry would leak them)
+		cctx, cancel := context.WithCancel(ctx)
+		a.cancelCam[cam.Name] = cancel
+		a.startCameraLocked(cctx, cam)
 	}
 	a.mu.Unlock()
 	a.hub.Broadcast(a.State())
@@ -144,6 +148,69 @@ func (a *App) RestartCamera(name string) error {
 
 // Stop shuts background processes down.
 func (a *App) Stop() { a.Go2RTC.Stop() }
+
+// AddCamera registers a new camera feed: persists the config, reloads
+// go2rtc so its streams exist, then starts recorder/detector pipelines.
+func (a *App) AddCamera(name, url string, record, motionEnabled bool) error {
+	a.mu.Lock()
+	if a.bgCtx == nil {
+		a.mu.Unlock()
+		return fmt.Errorf("app not started")
+	}
+	if err := a.Cfg.AddCamera(name, url, record, motionEnabled); err != nil {
+		a.mu.Unlock()
+		return err
+	}
+	bg := a.bgCtx
+	a.mu.Unlock()
+
+	if err := a.Go2RTC.Reload(bg); err != nil {
+		a.Log.Warn("go2rtc reload after add", "err", err)
+	}
+
+	a.mu.Lock()
+	cam := a.Cfg.Camera(name)
+	if cam == nil {
+		a.mu.Unlock()
+		return fmt.Errorf("camera %q vanished", name)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	a.cancelCam[name] = cancel
+	a.startCameraLocked(ctx, cam)
+	a.mu.Unlock()
+
+	a.Republish()
+	return nil
+}
+
+// RemoveCamera stops a camera's pipelines, removes it from the config,
+// and reloads go2rtc. Media already on disk is left for retention to prune.
+func (a *App) RemoveCamera(name string) error {
+	a.mu.Lock()
+	if a.Cfg.Camera(name) == nil {
+		a.mu.Unlock()
+		return fmt.Errorf("camera %q not found", name)
+	}
+	if cancel, ok := a.cancelCam[name]; ok {
+		cancel()
+		delete(a.cancelCam, name)
+	}
+	delete(a.detectors, name)
+	bg := a.bgCtx
+	if err := a.Cfg.RemoveCamera(name); err != nil {
+		a.mu.Unlock()
+		return err
+	}
+	a.mu.Unlock()
+
+	if bg != nil {
+		if err := a.Go2RTC.Reload(bg); err != nil {
+			a.Log.Warn("go2rtc reload after remove", "err", err)
+		}
+	}
+	a.Republish()
+	return nil
+}
 
 // Detector returns a camera's detector if running.
 func (a *App) Detector(cam string) *motion.Detector {
